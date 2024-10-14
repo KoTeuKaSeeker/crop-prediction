@@ -15,10 +15,10 @@ if __name__ == "__main__":
     df = pd.DataFrame()
     for parameter_name in weather_parameters:
         response = requests.post('https://agroapi.xn--b1ahgiuw.xn--p1ai/parameter/', json={
-            "endTime": 1729014252, #1729014252
+            "endTime": 1729014252,
             "meteoId": "00001F76",
             "parameterName": parameter_name,
-            "startTime": 0, #1728864252
+            "startTime": 0,
             "timestamp": True,
             "intervals": "day"
         })
