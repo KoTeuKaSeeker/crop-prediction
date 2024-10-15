@@ -5,6 +5,7 @@ from torch.utils.data import Dataset, DataLoader
 import pandas as pd
 import re
 import numpy as np
+import time
 
 
 class CropDataset(Dataset):
@@ -81,12 +82,13 @@ if __name__ == "__main__":
     model = CropTransformer(config).init_scaler(train_dataset.mean, train_dataset.std)
     model = model.to(device)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    optimizer = model.configure_optimizers(weight_decay=0.1, learning_rate=learning_rate)
     criterion = nn.MSELoss()
 
     model.train()
     total_step = 0
     for epoch in range(epochs):
+        t0 = time.time()
         for x, y in train_loader:
             x, y = x.to(device), y.to(device)
             x, y = model.input_scaler(x), model.input_scaler(y)
@@ -98,6 +100,9 @@ if __name__ == "__main__":
             optimizer.step()
             
             torch.cuda.synchronize()
-            print(f"total_step {total_step} | loss: {loss.item()}")
+            t1 = time.time()
+            dt = t1 - t0
+            print(f"total_step {total_step} | loss: {loss.item()} | dt: {dt:.3f}")
             
             total_step += 1
+            t0 = time.time()
