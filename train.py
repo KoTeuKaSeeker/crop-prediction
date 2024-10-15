@@ -1,0 +1,127 @@
+from src.models.crop_tarnsformer import CropTransformer, CropTransformerConfig
+from src.crop_dataset import CropDataset
+from src.device_manager import DeviceManager
+from src.saver import Saver
+import torch
+import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
+import pandas as pd
+import re
+import numpy as np
+import time
+
+class TrainParameters():
+    def __init__(self, context_size, batch_size, epochs, learning_rate, 
+                 saving_freq, save_path, validation_freq, count_validation_steps):
+        self.context_size = context_size
+        self.batch_size = batch_size
+        self.epochs = epochs
+        self.learning_rate = learning_rate
+        self.saving_freq = saving_freq
+        self.save_path = save_path
+        self.validation_freq = validation_freq
+        self.count_validation_steps = count_validation_steps
+
+
+def get_validation_loss(model: CropTransformer, val_dataset: DataLoader, device_manager: DeviceManager, count_validation_steps:int=-1):
+    """
+    Оцениват значение функции потерь на валидационной выборке.
+    
+    **Если count_validation_steps < 0, тогда валидация будет проходить 1 эпоху**
+    """
+    
+    model.eval()
+    count_validation_steps = len(val_dataset) if count_validation_steps < 0 else count_validation_steps
+    validation_step = 0
+    val_loss = torch.tensor(0.0, dtype=torch.float32, device=device_manager.device)
+    for x, y in val_dataset:
+        x, y = x.to(device_manager.device), y.to(device_manager.device)
+        x, y = model.input_scaler(x), model.input_scaler(y)
+
+        y_pred = model(x)
+        loss = nn.MSELoss()(y_pred, y)
+        val_loss += loss / count_validation_steps
+
+        if validation_step >= count_validation_steps:
+            break
+    model.train()
+
+    return val_loss.cpu()
+
+
+def run(device_manager: DeviceManager, train_parameters: TrainParameters):
+    train_dataset, val_dataset = CropDataset.get_train_and_valid("data/argo_dataset/argo_dataset.csv", 
+                                                                 context_size=train_parameters.context_size, 
+                                                                 num_aug_copies=5)
+    train_loader = DataLoader(train_dataset, train_parameters.batch_size, shuffle=True)
+    val_dataset = DataLoader(val_dataset, train_parameters.batch_size, shuffle=True)
+
+    config = CropTransformerConfig()
+    model = CropTransformer(config).init_scaler(train_dataset.mean, train_dataset.std)
+    model = model.to(device_manager.device)
+
+    optimizer = model.configure_optimizers(weight_decay=0.1, learning_rate=train_parameters.learning_rate)
+    criterion = nn.MSELoss()
+
+    saver = Saver(train_parameters.save_path, device_manager)
+
+    model.train()
+    total_step = 0
+    for epoch in range(train_parameters.epochs):
+        t0 = time.time()
+        step = 0
+        for x, y in train_loader:
+            x, y = x.to(device_manager.device), y.to(device_manager.device)
+            x, y = model.input_scaler(x), model.input_scaler(y)
+            
+            optimizer.zero_grad()
+            preds = model(x)
+            loss = criterion(preds, y)
+            loss.backward()
+            optimizer.step()
+            
+            is_save_step = total_step > 0 and total_step % train_parameters.saving_freq == 0
+            is_validation_step = is_save_step or (total_step > 0 and total_step % train_parameters.validation_freq == 0)
+
+            if is_validation_step:
+                val_loss = get_validation_loss(model, val_dataset, device_manager, train_parameters.count_validation_steps).item()
+
+            if is_save_step:
+                print("Saving model...")
+                saver.save(model, optimizer, val_loss)
+
+            torch.cuda.synchronize()
+            t1 = time.time()
+            dt = t1 - t0
+            val_loss_str = str(val_loss) if is_validation_step else "-"
+            log_line = f"total_step {total_step}, epoch {epoch}, step {step}  | loss: {loss.item()} | dt: {dt:.3f} | val_loss: {val_loss_str}"
+            print(log_line)
+            saver.save_log(log_line)
+
+            total_step += 1
+            step += 1
+            t0 = time.time()
+
+
+if __name__ == "__main__":
+    random_seed = 1337 # Для получения детерменированных результатов
+    context_size = 128
+    batch_size = 16
+    epochs = 1000
+    learning_rate = 1e-6
+    saving_freq = 105
+    validation_freq = 100
+    count_validation_steps = 5
+    save_path = "models\checkpoint_model"
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    torch.manual_seed(random_seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(random_seed)
+
+    device_manager = DeviceManager(device)
+    train_parameters = TrainParameters(context_size, batch_size, epochs, learning_rate, saving_freq, 
+                                       save_path, validation_freq, count_validation_steps)
+
+    run(device_manager, train_parameters)
