@@ -1,6 +1,7 @@
 from src.models.crop_tarnsformer import CropTransformer, CropTransformerConfig
 from src.crop_dataset import CropDataset
 from src.device_manager import DeviceManager
+from src.comet_manager import CometManager
 from src.saver import Saver
 import torch
 import torch.nn as nn
@@ -49,7 +50,7 @@ def get_validation_loss(model: CropTransformer, val_dataset: DataLoader, device_
     return val_loss.cpu()
 
 
-def run(device_manager: DeviceManager, train_parameters: TrainParameters):
+def run(device_manager: DeviceManager, train_parameters: TrainParameters, comet_manager: CometManager):
     train_dataset, val_dataset = CropDataset.get_train_and_valid("data/argo_dataset/argo_dataset.csv", 
                                                                  context_size=train_parameters.context_size, 
                                                                  num_aug_copies=5)
@@ -65,8 +66,8 @@ def run(device_manager: DeviceManager, train_parameters: TrainParameters):
 
     saver = Saver(train_parameters.save_path, device_manager)
 
-    model.train()
     total_step = 0
+    validation_step = 0
     for epoch in range(train_parameters.epochs):
         t0 = time.time()
         step = 0
@@ -74,6 +75,7 @@ def run(device_manager: DeviceManager, train_parameters: TrainParameters):
             x, y = x.to(device_manager.device), y.to(device_manager.device)
             x, y = model.input_scaler(x), model.input_scaler(y)
             
+            model.train()
             optimizer.zero_grad()
             preds = model(x)
             loss = criterion(preds, y)
@@ -98,12 +100,21 @@ def run(device_manager: DeviceManager, train_parameters: TrainParameters):
             print(log_line)
             saver.save_log(log_line)
 
+            if comet_manager.use_comet:
+                comet_manager.experiment.log_metric("loss", loss.item(), step=total_step)
+                comet_manager.experiment.log_metric("dt", dt, step=total_step)
+                if is_validation_step:
+                    comet_manager.experiment.log_metric("val_loss", val_loss, step=total_step, epoch=validation_step)
+
             total_step += 1
             step += 1
+            validation_step += int(is_validation_step)
             t0 = time.time()
 
 
 if __name__ == "__main__":
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
     random_seed = 1337 # Для получения детерменированных результатов
     context_size = 128
     batch_size = 16
@@ -114,7 +125,11 @@ if __name__ == "__main__":
     count_validation_steps = 5
     save_path = "models\checkpoint_model"
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # comet
+    comet_api_key = "MB9XnDlVfSVSMuK8PqL6hXvNg"
+    comet_project_name = "crop-prediction"
+    comet_workspace = "koteukaseeker"
+    use_comet = True
 
     torch.manual_seed(random_seed)
     if torch.cuda.is_available():
@@ -123,5 +138,6 @@ if __name__ == "__main__":
     device_manager = DeviceManager(device)
     train_parameters = TrainParameters(context_size, batch_size, epochs, learning_rate, saving_freq, 
                                        save_path, validation_freq, count_validation_steps)
+    comet_manager = CometManager(comet_api_key, comet_project_name, comet_workspace, device_manager, use_comet=use_comet)
 
-    run(device_manager, train_parameters)
+    run(device_manager, train_parameters, comet_manager)
