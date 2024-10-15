@@ -8,10 +8,14 @@ import numpy as np
 
 
 class CropDataset(Dataset):
-    def __init__(self, x, y):
+    def __init__(self, x: torch.Tensor, y: torch.Tensor):
         self.x = x
         self.y = y
         self.context_size = self.x[0].shape[0]
+
+        self.mean = None
+        self.std = None
+
 
     @classmethod
     def get_train_and_valid(cls, path, context_size, num_aug_copies=1, validation_split=0.2):
@@ -25,10 +29,8 @@ class CropDataset(Dataset):
 
         df.drop(columns=['date'], inplace=True)
 
-        mean = df.mean()
-        std = df.std()
-
-        df = (df - mean) / std
+        mean = torch.tensor(df.mean().values, dtype=torch.float32)[None, None, ...]
+        std = torch.tensor(df.std().values, dtype=torch.float32)[None, None, ...]
 
         in_num_batches = len(df) // context_size
         offset_size = context_size // num_aug_copies
@@ -48,6 +50,9 @@ class CropDataset(Dataset):
 
         train_dataset = cls(x[:num_train], y[:num_train])
         val_dataset = cls(x[num_train:], y[num_train:])
+
+        train_dataset.mean, val_dataset.mean = mean, mean
+        train_dataset.std, val_dataset.std = std, std
 
         return train_dataset, val_dataset
 
@@ -73,7 +78,7 @@ if __name__ == "__main__":
     val_dataset = DataLoader(val_dataset, batch_size, shuffle=True)
 
     config = CropTransformerConfig()
-    model = CropTransformer(config)
+    model = CropTransformer(config).init_scaler(train_dataset.mean, train_dataset.std)
     model = model.to(device)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
@@ -84,6 +89,7 @@ if __name__ == "__main__":
     for epoch in range(epochs):
         for x, y in train_loader:
             x, y = x.to(device), y.to(device)
+            x, y = model.input_scaler(x), model.input_scaler(y)
             
             optimizer.zero_grad()
             preds = model(x)
@@ -95,5 +101,3 @@ if __name__ == "__main__":
             print(f"total_step {total_step} | loss: {loss.item()}")
             
             total_step += 1
-
-    
