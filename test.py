@@ -81,7 +81,7 @@ if __name__ == "__main__":
     model = CropTransformer(config).init_scaler(train_dataset.mean, train_dataset.std)
     model = model.to(device)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    optimizer = model.configure_optimizers(weight_decay=0.1, learning_rate=learning_rate)
     criterion = nn.MSELoss()
 
     model.train()

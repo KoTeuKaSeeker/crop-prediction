@@ -31,16 +31,7 @@ class Scaler(nn.Module):
 
 class CropTransformer(nn.Module):
     def __init__(self, config: CropTransformerConfig):
-        super().__init__()
-
-        # context_size = 1024
-        # d_model = 512          # The number of expected features in the encoder/decoder inputs
-        # nhead = 8              # The number of heads in the multiheadattention models
-        # num_layers = 6  # The number of encoder layers in the encoder
-        # dim_feedforward = 2048  # The dimension of the feedforward network model
-        # dropout = 0.1          # Dropout value
-        # output_dim = 7
-        
+        super().__init__()    
         self.input_scaler = Scaler(torch.zeros((1, 1, config.input_dim)), torch.ones((1, 1, config.input_dim)))
         self.input_linear = nn.Linear(config.input_dim, config.d_model)
         self.pos_encoder = nn.Embedding(config.context_size, config.d_model)
@@ -75,3 +66,15 @@ class CropTransformer(nn.Module):
     def init_scaler(self, mean, std):
         self.input_scaler = Scaler(mean, std)
         return self
+    
+
+    def configure_optimizers(self, weight_decay, learning_rate):
+        param_dict = {pn: p for pn, p in self.named_parameters() if p.requires_grad}
+        decay_params = [p for pn, p in param_dict.items() if p.dim() >= 2]
+        nodecay_params = [p for pn, p in param_dict.items() if p.dim() < 2]
+        optim_groups = [
+            {'params': decay_params, 'weight_decay': weight_decay},
+            {'params': nodecay_params, 'weight_decay': 0.0},
+        ]
+        optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate)
+        return optimizer
