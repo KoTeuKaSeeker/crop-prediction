@@ -10,6 +10,8 @@ import pandas as pd
 import re
 import numpy as np
 import time
+import os
+from dotenv import load_dotenv
 
 class TrainParameters():
     def __init__(self, context_size, batch_size, epochs, learning_rate, 
@@ -48,6 +50,31 @@ def get_validation_loss(model: CropTransformer, val_dataset: DataLoader, device_
     model.train()
 
     return val_loss.cpu()
+
+
+def load_comet_data(use_comet: bool):
+    if use_comet:
+        if not os.path.exists(".env"):
+            print("У вас не инициализированны параметры окружения comet_ml. Хотите использовать comet_ml? (y/n)")
+            if input() == "y":
+                print("Введите параметры окружения comet_ml:")
+                comet_api_key = input("COMET_API_KEY: ")
+                comet_project_name = input("COMET_PROJECT_NAME: ")
+                comet_workspace = input("COMET_WORKSPACE: ")
+                
+                with open(".env", "w") as f:
+                    f.write(f"COMET_API_KEY={comet_api_key}\n")
+                    f.write(f"COMET_PROJECT_NAME={comet_project_name}\n")
+                    f.write(f"COMET_WORKSPACE={comet_workspace}\n")
+
+                return comet_api_key, comet_project_name, comet_workspace, True
+        else:
+            load_dotenv()
+            comet_api_key = os.getenv("COMET_API_KEY")
+            comet_project_name = os.getenv("COMET_PROJECT_NAME")
+            comet_workspace = os.getenv("COMET_WORKSPACE")
+            return comet_api_key, comet_project_name, comet_workspace, True
+    return "comet_not_use", "comet_not_use", "comet_not_use", False
 
 
 def run(device_manager: DeviceManager, train_parameters: TrainParameters, comet_manager: CometManager):
@@ -125,11 +152,8 @@ if __name__ == "__main__":
     count_validation_steps = 5
     save_path = "models\checkpoint_model"
 
-    # comet
-    comet_api_key = "MB9XnDlVfSVSMuK8PqL6hXvNg"
-    comet_project_name = "crop-prediction"
-    comet_workspace = "koteukaseeker"
     use_comet = True
+    comet_api_key, comet_project_name, comet_workspace, use_comet = load_comet_data(use_comet)
 
     torch.manual_seed(random_seed)
     if torch.cuda.is_available():

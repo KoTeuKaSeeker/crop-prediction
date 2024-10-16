@@ -1,7 +1,5 @@
 from comet_ml import Experiment
 from src.device_manager import DeviceManager
-import requests
-import json
 
 class CometManager():
     def __init__(self, api_key: str, project_name: str, workspace: str, device_manager: DeviceManager, use_comet=True):
