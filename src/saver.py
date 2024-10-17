@@ -58,3 +58,20 @@ class Saver():
             self._best_val_loss = val_loss
             best_model_path = os.path.join(self.checkpoint_dir, "best.pt")
             self.save_checkpoint(best_model_path, model, optimizer, val_loss)
+
+    def load(self, path: str) -> nn.Module:
+        """
+        Loads the model from the specified path.
+        """
+
+        checkpoint = torch.load(path)
+
+        model = nn.Module()
+        optimizer = torch.optim.Optimizer()
+
+        model.load_state_dict(checkpoint['model'])
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        val_loss = checkpoint['val_loss']
+
+        return model, optimizer, val_loss
+    

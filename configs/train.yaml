@@ -1,0 +1,10 @@
+context_size: 128
+batch_size: 16
+epochs: 100000
+learning_rate: 1e-6
+optimizer_type: "Adam"
+saving_freq: 1000
+save_path: "models/checkpoint_model"
+validation_freq: 100
+count_validation_steps: 5
+generation_freq: 100

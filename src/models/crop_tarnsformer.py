@@ -33,7 +33,9 @@ class Scaler(nn.Module):
 
 class CropTransformer(nn.Module):
     def __init__(self, config: CropTransformerConfig):
-        super().__init__()    
+        super().__init__()
+        self.config = config
+
         self.input_scaler = Scaler(torch.zeros((1, 1, config.input_dim)), torch.ones((1, 1, config.input_dim)))
         self.input_proj = nn.Linear(config.input_dim, config.d_input_linear)
         self.input_linear = nn.Linear(config.d_input_linear, config.d_model)
@@ -109,3 +111,35 @@ class CropTransformer(nn.Module):
         ]
         optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate)
         return optimizer
+    
+    def save_checkpoint(self, filename: str, optimizer: torch.optim.Optimizer, val_loss):
+        """
+        Сохраняет только один чекпоинт
+        """
+        checkpoint = {
+            'model': self.state_dict(),
+            'model_config': self.config,
+            'optimizer': optimizer.state_dict(),
+            'train_config': self.config,
+            'metrics': {
+                'val_loss': val_loss
+            }
+        }
+        torch.save(checkpoint, filename)
+    
+    @classmethod
+    def from_checkpoint(cls, path: str):
+        """
+        Loads the model from the specified path.
+        """
+
+        checkpoint = torch.load(path)
+
+        model = cls(checkpoint['config'])
+        optimizer = torch.optim.Optimizer()
+
+        model.load_state_dict(checkpoint['model'])
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        val_loss = checkpoint['val_loss']
+
+        return model, optimizer, val_loss
