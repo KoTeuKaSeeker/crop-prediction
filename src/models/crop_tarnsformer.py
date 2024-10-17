@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 @dataclass
 class CropTransformerConfig():
-    input_dim = 12
+    input_dim = 11
     d_input_linear = 2048
     context_size = 1024
     d_model = 768          # The number of expected features in the encoder/decoder inputs
@@ -14,8 +14,8 @@ class CropTransformerConfig():
     num_layers = 10  # The number of encoder layers in the encoder
     dim_feedforward = 2048  # The dimension of the feedforward network model
     dropout = 0.1          # Dropout value
-    output_dim = 12
-    count_date_intervals = 5
+    output_dim = 11
+    count_date_intervals = 4
 
 
 class Scaler(nn.Module):
