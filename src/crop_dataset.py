@@ -2,28 +2,34 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
 import pandas as pd
+import numpy as np
+from typing import List
 
 class CropDataset(Dataset):
-    def __init__(self, x: torch.Tensor, y: torch.Tensor):
+    def __init__(self, x: torch.Tensor, y: torch.Tensor, parameter_names: List[str]):
         self.x = x
         self.y = y
         self.context_size = self.x[0].shape[0]
+        self.parameter_names = parameter_names
 
         self.mean = None
         self.std = None
 
 
     @classmethod
-    def get_train_and_valid(cls, path, context_size, num_aug_copies=1, validation_split=0.2):
+    def get_train_and_valid(cls, path, context_size, num_aug_copies=1, validation_split=0.2, count_date_intervals=3):
         df = pd.read_csv(path)
 
-        df['date'] = pd.to_datetime(df['date'])
+        date = pd.to_datetime(df['date'])
+        hour = date.apply(lambda x: (x - pd.Timestamp(f"{x.year}-01-01")).total_seconds() / 3600)
 
-        df['month'] = df['date'].dt.month
-        df['day'] = df['date'].dt.day
-        df['hour'] = df['date'].dt.hour
+        max_hours = 366 * 24
+        size_interval = max_hours / count_date_intervals
+        df[[f"hour_{i}" for i in range(count_date_intervals)]] = np.clip(hour.values[:, None].repeat(count_date_intervals, 1)/size_interval - np.arange(count_date_intervals)[None].repeat(len(hour), 0), 0.0, 1.0)
 
         df.drop(columns=['date'], inplace=True)
+
+        parameter_names = df.columns
 
         mean = torch.tensor(df.mean().values, dtype=torch.float32)[None, None, ...]
         std = torch.tensor(df.std().values, dtype=torch.float32)[None, None, ...]
@@ -44,8 +50,8 @@ class CropDataset(Dataset):
         
         num_train = int((1 - validation_split) * len(x))
 
-        train_dataset = cls(x[:num_train], y[:num_train])
-        val_dataset = cls(x[num_train:], y[num_train:])
+        train_dataset = cls(x[:num_train], y[:num_train], parameter_names)
+        val_dataset = cls(x[num_train:], y[num_train:], parameter_names)
 
         train_dataset.mean, val_dataset.mean = mean, mean
         train_dataset.std, val_dataset.std = std, std

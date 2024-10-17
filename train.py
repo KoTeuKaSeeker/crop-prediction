@@ -12,10 +12,21 @@ import numpy as np
 import time
 import os
 from dotenv import load_dotenv
+import matplotlib.pyplot as plt
+import math
+from typing import List
+
+# weather_parameters = ["SOLAR_RADIATION",
+#                         "PRECIPITATION",
+#                         "WIND_SPEED",
+#                         "LEAF_WETNESS",
+#                         "HC_AIR_TEMPERATURE",
+#                         "HC_RELATIVE_HUMIDITY",
+#                         "DEW_POINT"]
 
 class TrainParameters():
     def __init__(self, context_size, batch_size, epochs, learning_rate, 
-                 saving_freq, save_path, validation_freq, count_validation_steps):
+                 saving_freq, save_path, validation_freq, count_validation_steps, generation_freq):
         self.context_size = context_size
         self.batch_size = batch_size
         self.epochs = epochs
@@ -24,6 +35,7 @@ class TrainParameters():
         self.save_path = save_path
         self.validation_freq = validation_freq
         self.count_validation_steps = count_validation_steps
+        self.generation_freq = generation_freq
 
 
 def get_validation_loss(model: CropTransformer, val_dataset: DataLoader, device_manager: DeviceManager, count_validation_steps:int=-1):
@@ -32,24 +44,65 @@ def get_validation_loss(model: CropTransformer, val_dataset: DataLoader, device_
     
     **Если count_validation_steps < 0, тогда валидация будет проходить 1 эпоху**
     """
-    
-    model.eval()
-    count_validation_steps = len(val_dataset) if count_validation_steps < 0 else count_validation_steps
-    validation_step = 0
-    val_loss = torch.tensor(0.0, dtype=torch.float32, device=device_manager.device)
-    for x, y in val_dataset:
-        x, y = x.to(device_manager.device), y.to(device_manager.device)
-        x, y = model.input_scaler(x), model.input_scaler(y)
+    with torch.no_grad():
+        model.eval()
+        count_validation_steps = len(val_dataset) if count_validation_steps < 0 else count_validation_steps
+        validation_step = 0
+        val_loss = torch.tensor(0.0, dtype=torch.float32, device=device_manager.device)
+        for x, y in val_dataset:
+            x, y = x.to(device_manager.device), y.to(device_manager.device)
+            x, y = model.input_scaler(x), model.input_scaler(y)
 
-        y_pred = model(x)
-        loss = nn.MSELoss()(y_pred, y)
-        val_loss += loss / count_validation_steps
+            y_pred = model(x)
+            loss = nn.MSELoss()(y_pred, y)
+            val_loss += loss / count_validation_steps
 
-        if validation_step >= count_validation_steps:
-            break
-    model.train()
+            if validation_step >= count_validation_steps:
+                break
+        model.train()
 
     return val_loss.cpu()
+
+
+def generate_predictions(model: CropTransformer, val_loader: DataLoader, parameter_names: List[str], save_dir: str, comet_manager: CometManager, device_manager: DeviceManager):
+    with torch.no_grad():
+        x, _ = next(iter(val_loader))
+        x = x[0][None].to(device_manager.device) # (1, T, C)
+        
+        context_part_size = x.size(1) // 2
+        context_x = x[:, :context_part_size]
+
+        pred_right_x = model.generate(context_x, x.size(1) - context_part_size)
+        cpred_right_x = torch.cat((context_x[:, -1:], pred_right_x), dim=1)
+        x, cpred_right_x = x.cpu(), cpred_right_x.cpu()
+        
+
+        count_date_intervals = model.count_date_intervals.item()
+        size_interval = 366 * 24 / count_date_intervals
+        h = torch.sum(x[..., -count_date_intervals:], dim=-1)[0] * size_interval
+
+        predict_parameter_names = parameter_names[:-count_date_intervals]
+
+        n_cols = 2
+        n_rows = math.ceil(len(predict_parameter_names) / n_cols)
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(12, 12))
+        axes = axes.flatten()
+        for ax in axes:
+            ax.axis('off')
+        
+        for i, (ax, parameter_name) in enumerate(zip(axes, predict_parameter_names)):
+            ax.plot(h.numpy(), x[0, :, i].numpy(), label="y")
+            ax.plot(h[-cpred_right_x.size(1):].numpy(), cpred_right_x[0, :, i].numpy(), marker='o', markevery=[0], linestyle='--', label="predicted y")
+            ax.legend()
+            ax.axis('on')
+            ax.set_xlabel("hour")
+            ax.set_ylabel(parameter_name)
+        
+        plt.tight_layout()
+
+        image_path = os.path.join(save_dir, "predictions.png")
+        plt.savefig(image_path, dpi=300)
+        comet_manager.log_image(image_path, "predictions")
 
 
 def load_comet_data(use_comet: bool):
@@ -80,16 +133,16 @@ def load_comet_data(use_comet: bool):
 def run(device_manager: DeviceManager, train_parameters: TrainParameters, comet_manager: CometManager):
     train_dataset, val_dataset = CropDataset.get_train_and_valid("data/argo_dataset/argo_dataset.csv", 
                                                                  context_size=train_parameters.context_size, 
-                                                                 num_aug_copies=5)
+                                                                 num_aug_copies=5,
+                                                                 count_date_intervals=3)
     train_loader = DataLoader(train_dataset, train_parameters.batch_size, shuffle=True)
-    val_dataset = DataLoader(val_dataset, train_parameters.batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, train_parameters.batch_size, shuffle=True)
 
     config = CropTransformerConfig()
     model = CropTransformer(config).init_scaler(train_dataset.mean, train_dataset.std)
     model = model.to(device_manager.device)
 
     optimizer = model.configure_optimizers(weight_decay=0.1, learning_rate=train_parameters.learning_rate)
-    criterion = nn.MSELoss()
 
     saver = Saver(train_parameters.save_path, device_manager)
 
@@ -105,19 +158,24 @@ def run(device_manager: DeviceManager, train_parameters: TrainParameters, comet_
             model.train()
             optimizer.zero_grad()
             preds = model(x)
-            loss = criterion(preds, y)
+            loss = nn.MSELoss()(preds, y)
             loss.backward()
             optimizer.step()
             
             is_save_step = total_step > 0 and total_step % train_parameters.saving_freq == 0
             is_validation_step = is_save_step or (total_step > 0 and total_step % train_parameters.validation_freq == 0)
+            is_generation_step = total_step % train_parameters.generation_freq == 0
 
             if is_validation_step:
-                val_loss = get_validation_loss(model, val_dataset, device_manager, train_parameters.count_validation_steps).item()
+                val_loss = get_validation_loss(model, val_loader, device_manager, train_parameters.count_validation_steps).item()
 
             if is_save_step:
                 print("Saving model...")
                 saver.save(model, optimizer, val_loss)
+            
+            if is_generation_step:
+                print("Generating predictions...")
+                generate_predictions(model, val_loader, train_dataset.parameter_names, train_parameters.save_path, comet_manager, device_manager)
 
             torch.cuda.synchronize()
             t1 = time.time()
@@ -147,8 +205,9 @@ if __name__ == "__main__":
     batch_size = 16
     epochs = 1000
     learning_rate = 1e-6
-    saving_freq = 105
+    saving_freq = 1000
     validation_freq = 100
+    generation_freq = 100
     count_validation_steps = 5
     save_path = "models\checkpoint_model"
 
@@ -161,7 +220,7 @@ if __name__ == "__main__":
 
     device_manager = DeviceManager(device)
     train_parameters = TrainParameters(context_size, batch_size, epochs, learning_rate, saving_freq, 
-                                       save_path, validation_freq, count_validation_steps)
+                                       save_path, validation_freq, count_validation_steps, generation_freq)
     comet_manager = CometManager(comet_api_key, comet_project_name, comet_workspace, device_manager, use_comet=use_comet)
 
     run(device_manager, train_parameters, comet_manager)
