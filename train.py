@@ -134,7 +134,7 @@ def run(device_manager: DeviceManager, train_parameters: TrainParameters, comet_
     train_dataset, val_dataset = CropDataset.get_train_and_valid("data/argo_dataset/argo_dataset.csv", 
                                                                  context_size=train_parameters.context_size, 
                                                                  num_aug_copies=5,
-                                                                 count_date_intervals=3)
+                                                                 count_date_intervals=5)
     train_loader = DataLoader(train_dataset, train_parameters.batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, train_parameters.batch_size, shuffle=True)
 
@@ -203,7 +203,7 @@ if __name__ == "__main__":
     random_seed = 1337 # Для получения детерменированных результатов
     context_size = 128
     batch_size = 16
-    epochs = 1000
+    epochs = 100000
     learning_rate = 1e-6
     saving_freq = 1000
     validation_freq = 100

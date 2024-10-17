@@ -6,16 +6,16 @@ from dataclasses import dataclass
 
 @dataclass
 class CropTransformerConfig():
-    input_dim = 10
+    input_dim = 12
     d_input_linear = 2048
     context_size = 1024
     d_model = 768          # The number of expected features in the encoder/decoder inputs
     nhead = 12             # The number of heads in the multiheadattention models
-    num_layers = 6  # The number of encoder layers in the encoder
+    num_layers = 10  # The number of encoder layers in the encoder
     dim_feedforward = 2048  # The dimension of the feedforward network model
     dropout = 0.1          # Dropout value
-    output_dim = 10
-    count_date_intervals = 3
+    output_dim = 12
+    count_date_intervals = 5
 
 
 class Scaler(nn.Module):
@@ -49,7 +49,8 @@ class CropTransformer(nn.Module):
     def forward(self, x): # B, 1024, 7
         B, T, C = x.shape
         
-        x = self.input_linear(self.input_proj(x)) # B, T, d_model        
+        x = nn.ReLU()(self.input_proj(x)) # Этот линейный слой нужен, чтобы учесть большую дискретность входных значений
+        x = self.input_linear(x) # B, T, d_model        
         pos_emb = self.pos_encoder(torch.arange(0, T, device=x.device)) # T, d_model
         x = x + pos_emb # B, T, d_model
 
