@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from dataclasses import dataclass
+import yaml
+import os
 
 
 @dataclass
@@ -32,21 +34,39 @@ class Scaler(nn.Module):
 
 
 class CropTransformer(nn.Module):
-    def __init__(self, config: CropTransformerConfig):
+    def __init__(self, config: dict):
         super().__init__()
         self.config = config
 
-        self.input_scaler = Scaler(torch.zeros((1, 1, config.input_dim)), torch.ones((1, 1, config.input_dim)))
-        self.input_proj = nn.Linear(config.input_dim, config.d_input_linear)
-        self.input_linear = nn.Linear(config.d_input_linear, config.d_model)
-        self.pos_encoder = nn.Embedding(config.context_size, config.d_model)
+        # self.input_dim = config["input_dim"]
+        # self.d_input_linear = config["d_input_linear"]
+        # self.context_size = config["context_size"]
+        # self.d_model = config["d_model"]
+        # self.nhead = config["nhead"]
+        # self.num_layers = config["num_layers"]
+        # self.dim_feedforward = config["dim_feedforward"]
+        # self.dropout = config["dropout"]
+        # self.output_dim = config["output_dim"]
+        # self.count_date_intervals = config["count_date_intervals"]
 
-        encoder_layer = nn.TransformerEncoderLayer(config.d_model, config.nhead, config.dim_feedforward, config.dropout)
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=config.num_layers)
+        self.input_scaler = Scaler(torch.zeros((1, 1, self.config["input_dim"])), torch.ones((1, 1, self.config["input_dim"])))
+        self.input_proj = nn.Linear(self.config["input_dim"], self.config["d_input_linear"])
+        self.input_linear = nn.Linear(self.config["d_input_linear"], self.config["d_model"])
+        self.pos_encoder = nn.Embedding(self.config["context_size"], self.config["d_model"])
 
-        self.fc_out = nn.Linear(config.d_model, config.output_dim)
+        encoder_layer = nn.TransformerEncoderLayer(self.config["d_model"], self.config["nhead"], self.config["dim_feedforward"], self.config["dropout"])
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=config["num_layers"])
+
+        self.fc_out = nn.Linear(self.config["d_model"], self.config["output_dim"])
         
-        self.count_date_intervals = nn.Parameter(torch.tensor(config.count_date_intervals, dtype=torch.int32), requires_grad=False)
+        self.config["count_date_intervals"] = nn.Parameter(torch.tensor(self.config["count_date_intervals"], dtype=torch.int32), requires_grad=False)
+    
+    @classmethod
+    def from_config(cls, path: str):
+        with open(path, 'r') as file:
+            config = yaml.safe_load(file)
+        model = cls(config)
+        return model
 
     def forward(self, x): # B, 1024, 7
         B, T, C = x.shape
@@ -77,7 +97,7 @@ class CropTransformer(nn.Module):
         if context_size < 0:
             context_size = self.pos_encoder.num_embeddings
         
-        count_date_intervals = self.count_date_intervals.item()
+        count_date_intervals = self.config["count_date_intervals"].item()
         size_interval = 366 * 24 / count_date_intervals
         last_date_hours = torch.sum(x[:, -1, -count_date_intervals:], dim=1)[:, None] * size_interval # B, 1
         generated_hours = torch.arange(1, count_generations+1, device=x.device)[None].repeat(B, 1) + last_date_hours
@@ -112,34 +132,66 @@ class CropTransformer(nn.Module):
         optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate)
         return optimizer
     
-    def save_checkpoint(self, filename: str, optimizer: torch.optim.Optimizer, val_loss):
+    def save_checkpoint(self, filename: str, optimizer: torch.optim.Optimizer, train_config: dict, val_loss):
         """
-        Сохраняет только один чекпоинт
+        Save a checkpoint.
         """
         checkpoint = {
             'model': self.state_dict(),
             'model_config': self.config,
             'optimizer': optimizer.state_dict(),
-            'train_config': self.config,
+            'train_config': train_config,
             'metrics': {
                 'val_loss': val_loss
             }
         }
         torch.save(checkpoint, filename)
     
+    def save(self, dir_path: str, optimizer: torch.optim.Optimizer, train_config: dict, metrics: dict, best_metrics: dict):
+        """
+        Save the last and the best versions of the model.
+        """
+
+        last_model_path = os.path.join(dir_path, "last.pt")
+        self.save_checkpoint(last_model_path, optimizer, train_config, metrics["val_loss"])
+
+        if best_metrics["val_loss"] is None or metrics["val_loss"] <= best_metrics["val_loss"]:
+            best_metrics["val_loss"] = metrics["val_loss"]
+            best_model_path = os.path.join(dir_path, "best.pt")
+            self.save_checkpoint(best_model_path, optimizer, train_config, metrics["val_loss"])
+    
     @classmethod
     def from_checkpoint(cls, path: str):
-        """
-        Loads the model from the specified path.
-        """
-
         checkpoint = torch.load(path)
 
-        model = cls(checkpoint['config'])
-        optimizer = torch.optim.Optimizer()
+        model = cls(checkpoint['model_config'])
+        model.load_state_dict(checkpoint["model"])
 
-        model.load_state_dict(checkpoint['model'])
-        optimizer.load_state_dict(checkpoint['optimizer'])
-        val_loss = checkpoint['val_loss']
+        train_config = checkpoint["train_config"]
+        # if train_config["optimizer_type"] == 'AdamW':
+        optimizer = torch.optim.AdamW(model.parameters(), lr=float(train_config['learning_rate']))
 
-        return model, optimizer, val_loss
+        optimizer = model.configure_optimizers(0.1, float(train_config['learning_rate']))
+        optimizer.load_state_dict(checkpoint["optimizer"])
+
+        return model, optimizer, train_config, checkpoint['metrics']
+        
+
+
+    
+    # @classmethod
+    # def from_checkpoint(cls, path: str):
+    #     """
+    #     Loads the model from the specified path.
+    #     """
+
+    #     checkpoint = torch.load(path)
+
+    #     model = cls(checkpoint['config'])
+    #     optimizer = torch.optim.Optimizer()
+
+    #     model.load_state_dict(checkpoint['model'])
+    #     optimizer.load_state_dict(checkpoint['optimizer'])
+    #     val_loss = checkpoint['val_loss']
+
+    #     return model, optimizer, val_loss

@@ -78,7 +78,7 @@ def generate_predictions(model: CropTransformer, val_loader: DataLoader, paramet
         x, cpred_right_x = x.cpu(), cpred_right_x.cpu()
         
 
-        count_date_intervals = model.count_date_intervals.item()
+        count_date_intervals = model.config["count_date_intervals"].item()
         size_interval = 366 * 24 / count_date_intervals
         h = torch.sum(x[..., -count_date_intervals:], dim=-1)[0] * size_interval
 
@@ -197,12 +197,43 @@ def run(device_manager: DeviceManager, train_parameters: TrainParameters, comet_
             validation_step += int(is_validation_step)
             t0 = time.time()
 
+def save_log(path: str, log_line: str):
+    log_path = os.path.join(path, "log.txt")
+    with open(log_path, "a") as f:
+        f.write(log_line + "\n")
+
+
+def get_last_prefix_dir_id(dir: str, prefix: str):
+    folder_names = os.listdir(dir)
+    last_dir_id = -1
+    for folder_name in folder_names:
+        pattern = r"^{}\d+$".format(prefix)
+        if bool(re.match(pattern, folder_name)):
+            run_id = int(re.findall(r'\d+', folder_name)[0])
+            if run_id > last_dir_id:
+                last_dir_id = run_id
+    return last_dir_id
+
+
+def generate_directory_for_prefix(dir: str, prefix: str):
+    os.makedirs(dir, exist_ok=True)
+    last_dir_id = get_last_prefix_dir_id(dir, prefix) + 1
+    new_run_dir = os.path.join(dir, prefix + str(last_dir_id))
+    os.makedirs(new_run_dir, exist_ok=True)
+    return new_run_dir
+
 
 def run1(device_manager: DeviceManager, comet_manager: CometManager):
     print("THIS IS THE TEST RUN FUNCTION, IF YOU DON'T SEE ANY CHANGES IT MIGHT BE THAT YOU'RE USING A WRONG FUNCTION!!!! (sorry for caps :3)")
     with open('configs/train.yaml') as file:
         train_config = yaml.safe_load(file)
-    
+
+    run_dir = "runs/crop_transformer/"
+    current_run_dir = generate_directory_for_prefix(run_dir, 'run')
+    current_phase_dir = generate_directory_for_prefix(current_run_dir, 'phase')
+    model_checkpoint_dir = os.path.join(current_phase_dir, "models")
+    os.makedirs(model_checkpoint_dir, exist_ok=True)
+
     train_dataset, val_dataset = CropDataset.get_train_and_valid("data/argo_dataset/argo_dataset.csv", 
                                                                  context_size=train_config["context_size"], 
                                                                  num_aug_copies=5,
@@ -211,13 +242,16 @@ def run1(device_manager: DeviceManager, comet_manager: CometManager):
     train_loader = DataLoader(train_dataset, train_config["batch_size"], shuffle=True)
     val_loader = DataLoader(val_dataset, train_config["batch_size"], shuffle=True)
 
-    config = CropTransformerConfig()
-    model = CropTransformer(config).init_scaler(train_dataset.mean, train_dataset.std)
+    # config = CropTransformerConfig()
+    model = CropTransformer.from_config("configs/crop_transformer.yaml")
+    model.init_scaler(train_dataset.mean, train_dataset.std)
     model = model.to(device_manager.device)
 
     optimizer = model.configure_optimizers(weight_decay=0.1, learning_rate=float(train_config["learning_rate"]))
 
-    saver = Saver(train_config["save_path"], device_manager)
+    # saver = Saver(train_config["save_path"], device_manager)
+    metrics = {"val_loss": None}
+    best_metrics = metrics.copy()
 
     total_step = 0
     validation_step = 0
@@ -240,29 +274,31 @@ def run1(device_manager: DeviceManager, comet_manager: CometManager):
             is_generation_step = total_step % train_config["generation_freq"] == 0
 
             if is_validation_step:
-                val_loss = get_validation_loss(model, val_loader, device_manager, train_config["count_validation_steps"]).item()
+                metrics["val_loss"] = get_validation_loss(model, val_loader, device_manager, train_config["count_validation_steps"]).item()
 
             if is_save_step:
                 print("Saving model...")
-                saver.save(model, optimizer, val_loss)
+                model.save(model_checkpoint_dir, optimizer, train_config, metrics, best_metrics)
+                # saver.save(model, optimizer, val_loss)
             
             if is_generation_step:
                 print("Generating predictions...")
-                generate_predictions(model, val_loader, train_dataset.parameter_names, train_config["save_path"], comet_manager, device_manager)
+                generate_predictions(model, val_loader, train_dataset.parameter_names, model_checkpoint_dir, comet_manager, device_manager)
 
             torch.cuda.synchronize()
             t1 = time.time()
             dt = t1 - t0
-            val_loss_str = str(val_loss) if is_validation_step else "-"
+            val_loss_str = str(metrics["val_loss"]) if is_validation_step else "-"
             log_line = f"total_step {total_step}, epoch {epoch}, step {step}  | loss: {loss.item()} | dt: {dt:.3f} | val_loss: {val_loss_str}"
             print(log_line)
-            saver.save_log(log_line)
+            # saver.save_log(log_line)
+            save_log(current_phase_dir, log_line)
 
             if comet_manager.use_comet:
                 comet_manager.experiment.log_metric("loss", loss.item(), step=total_step)
                 comet_manager.experiment.log_metric("dt", dt, step=total_step)
                 if is_validation_step:
-                    comet_manager.experiment.log_metric("val_loss", val_loss, step=total_step, epoch=validation_step)
+                    comet_manager.experiment.log_metric("val_loss", metrics["val_loss"], step=total_step, epoch=validation_step)
 
             total_step += 1
             step += 1
