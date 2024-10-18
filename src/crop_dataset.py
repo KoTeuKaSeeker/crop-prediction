@@ -21,6 +21,11 @@ class CropDataset(Dataset):
         df = pd.read_csv(path)
 
         date = pd.to_datetime(df['date'])
+
+        df["hour"] = date.dt.hour
+        df["day"] = date.dt.day
+        df["month"] = date.dt.month
+
         hour = date.apply(lambda x: (x - pd.Timestamp(f"{x.year}-01-01")).total_seconds() / 3600)
 
         max_hours = 366 * 24
