@@ -277,23 +277,3 @@ class CropTransformer(nn.Module):
         optimizer.load_state_dict(checkpoint["optimizer"])
 
         return model, optimizer, train_config, checkpoint['metrics']
-        
-
-
-    
-    # @classmethod
-    # def from_checkpoint(cls, path: str):
-    #     """
-    #     Loads the model from the specified path.
-    #     """
-
-    #     checkpoint = torch.load(path)
-
-    #     model = cls(checkpoint['config'])
-    #     optimizer = torch.optim.Optimizer()
-
-    #     model.load_state_dict(checkpoint['model'])
-    #     optimizer.load_state_dict(checkpoint['optimizer'])
-    #     val_loss = checkpoint['val_loss']
-
-    #     return model, optimizer, val_loss
