@@ -1,3 +1,7 @@
+run: -1
+load_last: True
+run_dir: "runs/crop_transformer/"
+random_seed: 1337
 context_size: 128
 batch_size: 16
 epochs: 100000
@@ -8,3 +12,4 @@ save_path: "models/checkpoint_model"
 validation_freq: 100
 count_validation_steps: 5
 generation_freq: 100
+use_comet: True

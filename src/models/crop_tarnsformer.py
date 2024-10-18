@@ -161,11 +161,12 @@ class CropTransformer(nn.Module):
             self.save_checkpoint(best_model_path, optimizer, train_config, metrics["val_loss"])
     
     @classmethod
-    def from_checkpoint(cls, path: str):
+    def from_checkpoint(cls, path: str, device):
         checkpoint = torch.load(path)
 
         model = cls(checkpoint['model_config'])
         model.load_state_dict(checkpoint["model"])
+        model.to(device)
 
         train_config = checkpoint["train_config"]
         # if train_config["optimizer_type"] == 'AdamW':
