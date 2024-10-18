@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import yaml
 import os
 import pandas as pd
+import numpy as np
 
 
 @dataclass
@@ -58,7 +59,27 @@ class CropTransformer(nn.Module):
         model = cls(config)
         return model
 
-    def forward(self, x): # B, 1024, 7
+    def forward(self, x):
+        """
+            Предсказывает следующее значение для каждого параметра временного ряда. 
+            Параметры имеют следующий вид:
+            [SOLAR_RADIATIO,
+            PRECIPITATION,
+            WIND_SPEED,
+            LEAF_WETNESS,
+            HC_AIR_TEMPERATURE,
+            HC_RELATIVE_HUMIDITY,
+            DEW_POINT,
+            hour,
+            day,
+            month,
+            hour_interval_1,
+            hour_interval_2,
+            ...
+            hour_interval_<count_date_intervals>]
+            
+            **Принимает на вход нормализированные данные**
+        """
         B, T, C = x.shape
         
         x = nn.ReLU()(self.input_proj(x)) # Этот линейный слой нужен, чтобы учесть большую дискретность входных значений
@@ -75,6 +96,26 @@ class CropTransformer(nn.Module):
         return x
 
     def sfroward(self, x):
+        """
+            Более удобная функция, дла предсказания значений. Предсказывает следующее значение 
+            для каждого параметра временного ряда, при этом **принимает на вход НЕ нормализированные данные**
+            Параметры имеют следующий вид:
+            [SOLAR_RADIATIO,
+            PRECIPITATION,
+            WIND_SPEED,
+            LEAF_WETNESS,
+            HC_AIR_TEMPERATURE,
+            HC_RELATIVE_HUMIDITY,
+            DEW_POINT,
+            hour,
+            day,
+            month,
+            hour_interval_1,
+            hour_interval_2,
+            ...
+            hour_interval_<count_date_intervals>]
+        """
+
         x = self.input_scaler(x)
         x = self.forward(x)
         x = self.input_scaler.inv_forward(x)
@@ -82,6 +123,26 @@ class CropTransformer(nn.Module):
     
 
     def generate(self, x, count_generations=1, context_size=-1):
+        """
+            Предсказывает **count_generations** следующий значений временного ряда. Принимает на
+            вход **не нормализированные данные**.
+            Параметры имеют следующий вид:
+            [SOLAR_RADIATIO,
+            PRECIPITATION,
+            WIND_SPEED,
+            LEAF_WETNESS,
+            HC_AIR_TEMPERATURE,
+            HC_RELATIVE_HUMIDITY,
+            DEW_POINT,
+            hour,
+            day,
+            month,
+            hour_interval_1,
+            hour_interval_2,
+            ...
+            hour_interval_<count_date_intervals>]
+        """
+
         B, T, C = x.shape
 
         if context_size < 0:
@@ -118,7 +179,43 @@ class CropTransformer(nn.Module):
                 idx = torch.cat((idx, last_pred[:, None, :]), dim=1)
         
         return idx[:, -count_generations:]
-            
+    
+
+    def predict(self, x: np.ndarray, count_generations=1, context_size=-1):
+        """
+            Более удобная версия функции generate. Предсказывает **count_generations** следующий 
+            значений временного ряда. Принимает на вход NumPy массив размером (T, C), где
+            T - количество временных шагов, C - количество входных параметров метеостанции. Все данные 
+            подаются в естественном, не нормализованном виде для удобства использования.
+            Параметры метеостанции, которые должны содержаться в x:
+            [SOLAR_RADIATIO,
+            PRECIPITATION,
+            WIND_SPEED,
+            LEAF_WETNESS,
+            HC_AIR_TEMPERATURE,
+            HC_RELATIVE_HUMIDITY,
+            DEW_POINT,
+            hour,
+            day,
+            month]
+        """
+        T, C = x.shape
+        
+        count_date_intervals = self.config["count_date_intervals"].item()
+        max_hours = 366 * 24
+        size_interval = max_hours / count_date_intervals
+        hour_interval = np.zeros((T, count_date_intervals))
+        for t in range(T):
+            hour = (pd.Timestamp(hour=int(x[t, -3]), day=int(x[t, -2]), month=int(x[t, -1]), year=2024) - pd.Timestamp("2024-01-01")).total_seconds() / 3600
+            hour_interval[t, :] = np.clip(np.array([hour]*count_date_intervals)/size_interval - np.arange(count_date_intervals), 0.0, 1.0)
+        
+        x = np.concatenate((x, hour_interval), axis=1)
+        x = torch.tensor(x, dtype=torch.float32, device=self.input_linear.weight.device)[None]
+
+        pred = self.generate(x, count_generations, context_size)
+
+        return pred[0].cpu().numpy()
+
 
     def init_scaler(self, mean, std):
         self.input_scaler = Scaler(mean, std)
