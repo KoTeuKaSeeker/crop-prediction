@@ -1,3 +1,12 @@
+# crop-prediction
+
+![Static Badge](https://img.shields.io/badge/Python-%237F52FF?style=for-the-badge&logo=Python&logoColor=white)
+![Static Badge](https://img.shields.io/badge/PyTorch-%23FE7B7B?style=for-the-badge&logo=PyTorch&logoColor=white)
+![Static Badge](https://img.shields.io/badge/PyTorchXLA-%234DA651?style=for-the-badge&logo=PyG&logoColor=white)
+![Static Badge](https://img.shields.io/badge/CometML-%234A2296?style=for-the-badge&logo=bitcomet&logoColor=white)
+![Static Badge](https://img.shields.io/badge/TPU-%2325A162?style=for-the-badge&logo=turbo&logoColor=white)
+![Static Badge](https://img.shields.io/badge/Git-%23EA330E?style=for-the-badge&logo=git&logoColor=white)
+
 Репозиторий содержит код для обучения и взаимодействия с моделью crop-transtormer, которая предназначена для предсказания параметров метеостанции в рамках конкурса Agrol.Meteo. 
 Модель crop-transtormer размером 35,485,482 параметров работает на архитектуре трансформер с некоторыми модификациями для обработки регрессионных данных и занимается предсказанием временных рядов 7-ми следующих параметров:
 
