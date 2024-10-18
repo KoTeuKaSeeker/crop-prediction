@@ -48,7 +48,7 @@ def generate_predictions(model: CropTransformer, val_loader: DataLoader, paramet
     with torch.no_grad():
         x, _ = next(iter(val_loader))
         x = x[0][None].to(device_manager.device) # (1, T, C)
-        
+
         context_part_size = x.size(1) // 2
         context_x = x[:, :context_part_size]
 
@@ -155,7 +155,6 @@ def run(device_manager: DeviceManager, comet_manager: CometManager, train_config
     else:
         model_dir = os.path.join(current_run_dir, f"phase{current_phase_id-1}", "models", "last.pt" if train_config["load_last"] else "best.pt")
         model, optimizer, train_config, metrics = CropTransformer.from_checkpoint(model_dir, device)
-
 
     best_metrics = metrics.copy()
 
