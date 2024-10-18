@@ -15,27 +15,7 @@ from dotenv import load_dotenv
 import matplotlib.pyplot as plt
 import math
 from typing import List
-
-# weather_parameters = ["SOLAR_RADIATION",
-#                         "PRECIPITATION",
-#                         "WIND_SPEED",
-#                         "LEAF_WETNESS",
-#                         "HC_AIR_TEMPERATURE",
-#                         "HC_RELATIVE_HUMIDITY",
-#                         "DEW_POINT"]
-
-class TrainParameters():
-    def __init__(self, context_size, batch_size, epochs, learning_rate, 
-                 saving_freq, save_path, validation_freq, count_validation_steps, generation_freq):
-        self.context_size = context_size
-        self.batch_size = batch_size
-        self.epochs = epochs
-        self.learning_rate = learning_rate
-        self.saving_freq = saving_freq
-        self.save_path = save_path
-        self.validation_freq = validation_freq
-        self.count_validation_steps = count_validation_steps
-        self.generation_freq = generation_freq
+import yaml
 
 
 def get_validation_loss(model: CropTransformer, val_dataset: DataLoader, device_manager: DeviceManager, count_validation_steps:int=-1):
@@ -77,7 +57,7 @@ def generate_predictions(model: CropTransformer, val_loader: DataLoader, paramet
         x, cpred_right_x = x.cpu(), cpred_right_x.cpu()
         
 
-        count_date_intervals = model.count_date_intervals.item()
+        count_date_intervals = model.config["count_date_intervals"].item()
         size_interval = 366 * 24 / count_date_intervals
         h = torch.sum(x[..., -count_date_intervals:], dim=-1)[0] * size_interval
 
@@ -130,25 +110,58 @@ def load_comet_data(use_comet: bool):
     return "comet_not_use", "comet_not_use", "comet_not_use", False
 
 
-def run(device_manager: DeviceManager, train_parameters: TrainParameters, comet_manager: CometManager):
+def save_log(path: str, log_line: str):
+    log_path = os.path.join(path, "log.txt")
+    with open(log_path, "a") as f:
+        f.write(log_line + "\n")
+
+def get_last_prefix_id(dir: str, prefix: str):
+    names = os.listdir(dir)
+    return -1 if len(names) == 0 else sorted([int(re.findall(r"\d+", n)[-1]) for n in names if bool(re.match(prefix+"\d+", n))])[-1]
+
+def generate_directory_for_prefix(dir: str, prefix: str, run_id: int):
+    last_id = sorted([int(re.findall(r"\d+", n)[-1]) for n in os.listdir(dir)+[f"{prefix}{0}"] if bool(re.match(prefix+("\d+" if run_id < 0 else str(run_id)), n))])[-1]
+    new_run_dir = os.path.join(dir, f"{prefix}{last_id+int((len(os.listdir(dir))>0))}")
+    os.makedirs(new_run_dir, exist_ok=True)
+    return new_run_dir
+
+
+def run(device_manager: DeviceManager, comet_manager: CometManager, train_config: dict):
+    current_run_id = get_last_prefix_id(train_config["run_dir"], 'run') + 1 if train_config["run"] < 0 else train_config["run"]
+    current_run_dir = os.path.join(train_config["run_dir"], f"run{current_run_id}")
+    os.makedirs(current_run_dir, exist_ok=True)
+
+    current_phase_id = get_last_prefix_id(current_run_dir, 'phase') + 1
+    current_phase_dir = os.path.join(current_run_dir, f"phase{current_phase_id}")
+    os.makedirs(current_phase_dir, exist_ok=True)
+
+    model_checkpoint_dir = os.path.join(current_phase_dir, "models")
+    os.makedirs(model_checkpoint_dir, exist_ok=True)
+
     train_dataset, val_dataset = CropDataset.get_train_and_valid("data/argo_dataset/argo_dataset.csv", 
-                                                                 context_size=train_parameters.context_size, 
+                                                                 context_size=train_config["context_size"], 
                                                                  num_aug_copies=5,
                                                                  count_date_intervals=4)
-    train_loader = DataLoader(train_dataset, train_parameters.batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, train_parameters.batch_size, shuffle=True)
 
-    config = CropTransformerConfig()
-    model = CropTransformer(config).init_scaler(train_dataset.mean, train_dataset.std)
-    model = model.to(device_manager.device)
+    train_loader = DataLoader(train_dataset, train_config["batch_size"], shuffle=True)
+    val_loader = DataLoader(val_dataset, train_config["batch_size"], shuffle=True)
 
-    optimizer = model.configure_optimizers(weight_decay=0.1, learning_rate=train_parameters.learning_rate)
+    if current_phase_id <= 0:
+        model = CropTransformer.from_config("configs/crop_transformer.yaml")
+        model.init_scaler(train_dataset.mean, train_dataset.std)
+        model = model.to(device_manager.device)
+        optimizer = model.configure_optimizers(weight_decay=0.1, learning_rate=float(train_config["learning_rate"]))
+        metrics = {"val_loss": None}
+    else:
+        model_dir = os.path.join(current_run_dir, f"phase{current_phase_id-1}", "models", "last.pt" if train_config["load_last"] else "best.pt")
+        model, optimizer, train_config, metrics = CropTransformer.from_checkpoint(model_dir, device)
 
-    saver = Saver(train_parameters.save_path, device_manager)
+
+    best_metrics = metrics.copy()
 
     total_step = 0
     validation_step = 0
-    for epoch in range(train_parameters.epochs):
+    for epoch in range(train_config["epochs"]):
         t0 = time.time()
         step = 0
         for x, y in train_loader:
@@ -162,34 +175,34 @@ def run(device_manager: DeviceManager, train_parameters: TrainParameters, comet_
             loss.backward()
             optimizer.step()
             
-            is_save_step = total_step > 0 and total_step % train_parameters.saving_freq == 0
-            is_validation_step = is_save_step or (total_step > 0 and total_step % train_parameters.validation_freq == 0)
-            is_generation_step = total_step % train_parameters.generation_freq == 0
+            is_save_step = total_step > 0 and total_step % train_config["saving_freq"] == 0
+            is_validation_step = is_save_step or (total_step > 0 and total_step % train_config["validation_freq"] == 0)
+            is_generation_step = total_step % train_config["generation_freq"] == 0
 
             if is_validation_step:
-                val_loss = get_validation_loss(model, val_loader, device_manager, train_parameters.count_validation_steps).item()
+                metrics["val_loss"] = get_validation_loss(model, val_loader, device_manager, train_config["count_validation_steps"]).item()
 
             if is_save_step:
                 print("Saving model...")
-                saver.save(model, optimizer, val_loss)
+                model.save(model_checkpoint_dir, optimizer, train_config, metrics, best_metrics)
             
             if is_generation_step:
                 print("Generating predictions...")
-                generate_predictions(model, val_loader, train_dataset.parameter_names, train_parameters.save_path, comet_manager, device_manager)
+                generate_predictions(model, val_loader, train_dataset.parameter_names, model_checkpoint_dir, comet_manager, device_manager)
 
             torch.cuda.synchronize()
             t1 = time.time()
             dt = t1 - t0
-            val_loss_str = str(val_loss) if is_validation_step else "-"
+            val_loss_str = str(metrics["val_loss"]) if is_validation_step else "-"
             log_line = f"total_step {total_step}, epoch {epoch}, step {step}  | loss: {loss.item()} | dt: {dt:.3f} | val_loss: {val_loss_str}"
             print(log_line)
-            saver.save_log(log_line)
+            save_log(current_phase_dir, log_line)
 
             if comet_manager.use_comet:
                 comet_manager.experiment.log_metric("loss", loss.item(), step=total_step)
                 comet_manager.experiment.log_metric("dt", dt, step=total_step)
                 if is_validation_step:
-                    comet_manager.experiment.log_metric("val_loss", val_loss, step=total_step, epoch=validation_step)
+                    comet_manager.experiment.log_metric("val_loss", metrics["val_loss"], step=total_step, epoch=validation_step)
 
             total_step += 1
             step += 1
@@ -200,27 +213,16 @@ def run(device_manager: DeviceManager, train_parameters: TrainParameters, comet_
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    random_seed = 1337 # Для получения детерменированных результатов
-    context_size = 128
-    batch_size = 16
-    epochs = 100000
-    learning_rate = 1e-6
-    saving_freq = 1000
-    validation_freq = 100
-    generation_freq = 100
-    count_validation_steps = 5
-    save_path = "models\checkpoint_model"
+    with open('configs/train.yaml') as file:
+        train_config = yaml.safe_load(file)
 
-    use_comet = True
-    comet_api_key, comet_project_name, comet_workspace, use_comet = load_comet_data(use_comet)
+    comet_api_key, comet_project_name, comet_workspace, use_comet = load_comet_data(train_config["use_comet"])
 
-    torch.manual_seed(random_seed)
+    torch.manual_seed(train_config["random_seed"])
     if torch.cuda.is_available():
-        torch.cuda.manual_seed(random_seed)
+        torch.cuda.manual_seed(train_config["random_seed"])
 
     device_manager = DeviceManager(device)
-    train_parameters = TrainParameters(context_size, batch_size, epochs, learning_rate, saving_freq, 
-                                       save_path, validation_freq, count_validation_steps, generation_freq)
     comet_manager = CometManager(comet_api_key, comet_project_name, comet_workspace, device_manager, use_comet=use_comet)
 
-    run(device_manager, train_parameters, comet_manager)
+    run(device_manager, comet_manager, train_config)
