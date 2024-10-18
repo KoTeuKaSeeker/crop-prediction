@@ -38,17 +38,6 @@ class CropTransformer(nn.Module):
         super().__init__()
         self.config = config
 
-        # self.input_dim = config["input_dim"]
-        # self.d_input_linear = config["d_input_linear"]
-        # self.context_size = config["context_size"]
-        # self.d_model = config["d_model"]
-        # self.nhead = config["nhead"]
-        # self.num_layers = config["num_layers"]
-        # self.dim_feedforward = config["dim_feedforward"]
-        # self.dropout = config["dropout"]
-        # self.output_dim = config["output_dim"]
-        # self.count_date_intervals = config["count_date_intervals"]
-
         self.input_scaler = Scaler(torch.zeros((1, 1, self.config["input_dim"])), torch.ones((1, 1, self.config["input_dim"])))
         self.input_proj = nn.Linear(self.config["input_dim"], self.config["d_input_linear"])
         self.input_linear = nn.Linear(self.config["d_input_linear"], self.config["d_model"])
