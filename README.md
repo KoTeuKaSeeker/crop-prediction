@@ -19,3 +19,21 @@
 
 # Примеры
 Большинство из параметров предсказываются моделью довольно хорошо (особенно SOLAR_RADIATION), но всё же присутствуют и те, которые предсказываются хуже (особенно PRECIPITATION и DEW_POINT).
+<h3 align="center">Example 1</h3>
+
+![0](https://github.com/user-attachments/assets/c6c956a8-6114-489f-bf26-850a0fa8135c)
+
+
+<h3 align="center">Example 2</h3>
+
+![1](https://github.com/user-attachments/assets/28bfb2f7-b23b-4db8-b45c-88908a542aac)
+
+
+<h3 align="center">Example 3</h3>
+
+![2](https://github.com/user-attachments/assets/2184847f-c800-4d3b-a908-136dc021af2f)
+
+
+<h3 align="center">Example 4</h3>
+
+![3](https://github.com/user-attachments/assets/158e95d3-6d4f-4637-ad93-257e6c0dd54b)
