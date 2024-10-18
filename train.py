@@ -216,6 +216,8 @@ if __name__ == "__main__":
     with open('configs/train.yaml') as file:
         train_config = yaml.safe_load(file)
 
+    os.makedirs(train_config["run_dir"], exist_ok=True)
+
     comet_api_key, comet_project_name, comet_workspace, use_comet = load_comet_data(train_config["use_comet"])
 
     torch.manual_seed(train_config["random_seed"])

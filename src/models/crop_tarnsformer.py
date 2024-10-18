@@ -4,11 +4,12 @@ import torch.optim as optim
 from dataclasses import dataclass
 import yaml
 import os
+import pandas as pd
 
 
 @dataclass
 class CropTransformerConfig():
-    input_dim = 11
+    input_dim = 14
     d_input_linear = 2048
     context_size = 1024
     d_model = 768          # The number of expected features in the encoder/decoder inputs
@@ -16,7 +17,7 @@ class CropTransformerConfig():
     num_layers = 10  # The number of encoder layers in the encoder
     dim_feedforward = 2048  # The dimension of the feedforward network model
     dropout = 0.1          # Dropout value
-    output_dim = 11
+    output_dim = 14
     count_date_intervals = 4
 
 
@@ -92,6 +93,19 @@ class CropTransformer(nn.Module):
         generated_hours = torch.arange(1, count_generations+1, device=x.device)[None].repeat(B, 1) + last_date_hours
         generated_date = torch.clip(generated_hours[:, :, None].repeat(1, 1, count_date_intervals)/size_interval - torch.arange(count_date_intervals, device=x.device)[None, None, :].repeat(B, count_generations, 1), 0.0, 1.0)
 
+        dates = x[:, -1:, -count_date_intervals-3:-count_date_intervals].repeat(1, count_generations, 1).cpu() # B, count_generations, 3
+        id = 1
+        for b in range(B):
+            for t in range(count_generations):
+                date = pd.Timestamp(hour=int(dates[b, t, 0].item()), 
+                                    day=int(dates[b, t, 1].item()), 
+                                    month=int(dates[b, t, 2].item()), year=2024)
+                new_date = date + pd.Timedelta(id, unit='h')
+                dates[b, t, :] = torch.tensor([new_date.hour, new_date.day, new_date.month])
+                id += 1
+        
+        dates = dates.to(x.device)
+
         with torch.no_grad():
             idx = x
             for step in range(count_generations):
@@ -99,6 +113,7 @@ class CropTransformer(nn.Module):
                 pred = self.sfroward(idx_slice) # B, T, output_dim
                 last_pred = pred[:, -1, :] # B, output_dim
                 last_pred[:, -count_date_intervals:] = generated_date[:, step]
+                last_pred[:, -count_date_intervals-3:-count_date_intervals] = dates[:, step]
                 
                 idx = torch.cat((idx, last_pred[:, None, :]), dim=1)
         
