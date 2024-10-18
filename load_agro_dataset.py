@@ -11,7 +11,7 @@ weather_parameters = ["SOLAR_RADIATION",
                         "HC_RELATIVE_HUMIDITY",
                         "DEW_POINT"]
 
-if __name__ == "__main__":
+def load_agro_dataset(save_path: str):
     df = pd.DataFrame()
     for parameter_name in weather_parameters:
         response = requests.post('https://agroapi.xn--b1ahgiuw.xn--p1ai/parameter/', json={
@@ -32,3 +32,6 @@ if __name__ == "__main__":
     
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     df.to_csv(save_path, index=False)
+
+if __name__ == "__main__":
+    load_agro_dataset(save_path)

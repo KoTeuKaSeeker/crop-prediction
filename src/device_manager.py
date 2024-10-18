@@ -1,3 +1,5 @@
+import torch
+
 class DeviceManager():
     """
     Пока что этот класс выглядит избыточным, но в последующем
@@ -6,3 +8,12 @@ class DeviceManager():
     """
     def __init__(self, device):
         self.device = device
+    
+
+    def mark_step(self):
+        """
+        Синхронизирует ускоритель с cpu.
+        """
+
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
