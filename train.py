@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import math
 from typing import List
 import yaml
+from load_agro_dataset import load_agro_dataset
 
 
 def get_validation_loss(model: CropTransformer, val_dataset: DataLoader, device_manager: DeviceManager, count_validation_steps:int=-1):
@@ -138,7 +139,10 @@ def run(device_manager: DeviceManager, comet_manager: CometManager, train_config
     model_checkpoint_dir = os.path.join(current_phase_dir, "models")
     os.makedirs(model_checkpoint_dir, exist_ok=True)
 
-    train_dataset, val_dataset = CropDataset.get_train_and_valid("data/argo_dataset/argo_dataset.csv", 
+    if not os.path.exists(train_config["crop_dataset_path"]):
+        load_agro_dataset(train_config["crop_dataset_path"])
+
+    train_dataset, val_dataset = CropDataset.get_train_and_valid(train_config["crop_dataset_path"], 
                                                                  context_size=train_config["context_size"], 
                                                                  num_aug_copies=5,
                                                                  count_date_intervals=4)
@@ -154,6 +158,7 @@ def run(device_manager: DeviceManager, comet_manager: CometManager, train_config
         metrics = {"val_loss": None}
     else:
         model_dir = os.path.join(current_run_dir, f"phase{current_phase_id-1}", "models", "last.pt" if train_config["load_last"] else "best.pt")
+        assert os.path.exists(model_dir), f"In configs/train.yaml you specify run id, that doesn't exist: run id = {train_config['run']}. If you want use auto choose, use run id = -1"
         model, optimizer, train_config, metrics = CropTransformer.from_checkpoint(model_dir, device)
 
     best_metrics = metrics.copy()
@@ -189,7 +194,7 @@ def run(device_manager: DeviceManager, comet_manager: CometManager, train_config
                 print("Generating predictions...")
                 generate_predictions(model, val_loader, train_dataset.parameter_names, model_checkpoint_dir, comet_manager, device_manager)
 
-            torch.cuda.synchronize()
+            device_manager.mark_step()
             t1 = time.time()
             dt = t1 - t0
             val_loss_str = str(metrics["val_loss"]) if is_validation_step else "-"

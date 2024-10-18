@@ -1,6 +1,7 @@
-run: 2
+run: -1
 load_last: True
 run_dir: "runs/crop_transformer/"
+crop_dataset_path: "data/argo_dataset/argo_dataset.csv"
 random_seed: 1337
 context_size: 256
 batch_size: 16
