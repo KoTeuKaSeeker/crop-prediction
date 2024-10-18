@@ -73,6 +73,9 @@ if __name__ == "__main__":
     # модели с Kaggle. Если в этом нет необходимости, можно просто использовать путь до модели
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model:CropTransformer = CropTransformer.from_checkpoint(load_model("models/crop-transformer/model.pt"), device)[0]
+
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"Количество параметров модели: {total_params}")
     
     # Генерация предсказания. pred представляет собой обычный NumPy массив, 
     # в нашем случае размером pred.shape = (count_generations, len(df.columns)) = (168, 10)
